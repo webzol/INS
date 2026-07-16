@@ -1,12 +1,18 @@
 (function () {
   'use strict';
 
+  // 防止同一页面被注入多次（all_frames + 重复加载）
+  if (window.__TD_IMAGE_COMPRESS_LOADED__) return;
+  window.__TD_IMAGE_COMPRESS_LOADED__ = true;
+
   const DEFAULTS = {
     autoDetect: true,
     quality: 80,
     maxEdge: 1920,
-    minSizeKB: 100,
-    format: 'auto' // auto | webp | jpeg
+    // 默认 0：所有图片都拦截。设为 100 时小于 100KB 的图不弹层。
+    minSizeKB: 0,
+    format: 'auto', // auto | webp | jpeg
+    debug: false
   };
 
   /** @type {{ kind: 'input', input: HTMLInputElement } | { kind: 'drop', target: EventTarget, originalEvent: DragEvent } | null} */
@@ -14,23 +20,68 @@
   let activeRoot = null;
   let config = { ...DEFAULTS };
   let dropDepth = 0;
+  let configReady = false;
+  const pendingJobs = [];
 
-  chrome.storage.sync.get(Object.keys(DEFAULTS), (result) => {
-    Object.keys(DEFAULTS).forEach((key) => {
-      if (result[key] !== undefined) config[key] = result[key];
-    });
-  });
+  function log(...args) {
+    if (config.debug) console.log('[TD-ImageCompress]', ...args);
+  }
 
-  chrome.storage.onChanged.addListener((changes) => {
-    Object.keys(DEFAULTS).forEach((key) => {
-      if (changes[key]) config[key] = changes[key].newValue;
+  function loadConfig() {
+    try {
+      chrome.storage.sync.get(DEFAULTS, (result) => {
+        if (chrome.runtime && chrome.runtime.lastError) {
+          console.warn('[TD-ImageCompress] storage:', chrome.runtime.lastError.message);
+        }
+        Object.keys(DEFAULTS).forEach((key) => {
+          if (result && result[key] !== undefined) config[key] = result[key];
+        });
+        // 兼容旧版本曾把 minSizeKB 默认成 100 的用户：若用户从未改过可在 UI 调到 0
+        configReady = true;
+        log('config ready', config);
+        while (pendingJobs.length) {
+          const job = pendingJobs.shift();
+          try {
+            job();
+          } catch (e) {
+            console.error('[TD-ImageCompress] pending job', e);
+          }
+        }
+      });
+    } catch (e) {
+      console.error('[TD-ImageCompress] storage get failed', e);
+      configReady = true;
+    }
+  }
+
+  loadConfig();
+
+  try {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area && area !== 'sync') return;
+      Object.keys(DEFAULTS).forEach((key) => {
+        if (changes[key]) config[key] = changes[key].newValue;
+      });
+      log('config changed', config);
     });
-  });
+  } catch (_) {
+    /* extension context */
+  }
 
   // ---------- helpers ----------
 
+  const IMAGE_EXT = /\.(jpe?g|png|gif|webp|bmp|heic|heif|avif|tif|tiff|jfif)$/i;
+
   function isImageFile(file) {
-    return !!(file && file.type && file.type.startsWith('image/') && !file.type.includes('svg'));
+    if (!file) return false;
+    const type = (file.type || '').toLowerCase();
+    if (type.startsWith('image/')) {
+      if (type.includes('svg')) return false;
+      return true;
+    }
+    // 部分系统/浏览器选图后 type 为空，用扩展名兜底
+    if (!type && file.name && IMAGE_EXT.test(file.name)) return true;
+    return false;
   }
 
   function formatSize(bytes) {
@@ -47,7 +98,8 @@
 
   function shouldIntercept(imageFiles) {
     if (!imageFiles.length) return false;
-    const minBytes = (Number(config.minSizeKB) || 0) * 1024;
+    const minBytes = Math.max(0, Number(config.minSizeKB) || 0) * 1024;
+    if (minBytes <= 0) return true;
     return imageFiles.some((f) => f.size >= minBytes);
   }
 
@@ -71,7 +123,7 @@
     if (!dt) return false;
     if (dt.types) {
       for (let i = 0; i < dt.types.length; i++) {
-        if (dt.types[i] === 'Files') return true;
+        if (String(dt.types[i]).toLowerCase() === 'files') return true;
       }
     }
     return !!(dt.files && dt.files.length);
@@ -90,6 +142,26 @@
       if (it.previewUrl) URL.revokeObjectURL(it.previewUrl);
       if (it.afterUrl) URL.revokeObjectURL(it.afterUrl);
     });
+  }
+
+  function mountHost() {
+    // 宿主本身 fixed，避免部分站点 body transform 导致 position:fixed 失效
+    const host = document.createElement('div');
+    host.id = 'image-optimizer-root';
+    host.setAttribute('data-td-image-compress', '1');
+    Object.assign(host.style, {
+      all: 'initial',
+      position: 'fixed',
+      top: '0',
+      left: '0',
+      width: '0',
+      height: '0',
+      zIndex: '2147483647',
+      pointerEvents: 'none'
+    });
+    const parent = document.documentElement || document.body;
+    parent.appendChild(host);
+    return host;
   }
 
   // ---------- compression ----------
@@ -153,7 +225,7 @@
       const ctx = canvas.getContext('2d', { alpha: true });
       if (!ctx) return file;
 
-      const maybeAlpha = /png|webp|gif/i.test(file.type);
+      const maybeAlpha = /png|webp|gif/i.test(file.type || '') || /\.(png|webp|gif)$/i.test(file.name || '');
       if (!maybeAlpha) {
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, width, height);
@@ -211,41 +283,107 @@
     return results;
   }
 
-  // ---------- file input intercept ----------
+  // ---------- intercept core ----------
 
-  document.addEventListener(
-    'change',
-    (event) => {
-      if (!config.autoDetect) return;
-      const target = event.target;
-      if (!(target instanceof HTMLInputElement) || target.type !== 'file') return;
+  function handleFileInput(input, event) {
+    if (!config.autoDetect) {
+      log('autoDetect off, skip');
+      return false;
+    }
+    if (!(input instanceof HTMLInputElement) || input.type !== 'file') return false;
+    if (input.dataset.optimizerProcessed === 'true') {
+      delete input.dataset.optimizerProcessed;
+      log('pass-through processed input');
+      return false;
+    }
 
-      if (target.dataset.optimizerProcessed === 'true') {
-        delete target.dataset.optimizerProcessed;
-        return;
-      }
+    const allFiles = input.files ? Array.from(input.files) : [];
+    if (!allFiles.length) {
+      log('no files on input');
+      return false;
+    }
 
-      const allFiles = target.files ? Array.from(target.files) : [];
-      if (!allFiles.length) return;
+    const imageFiles = allFiles.filter(isImageFile);
+    log('input files', allFiles.length, 'images', imageFiles.length, imageFiles.map((f) => `${f.name}:${f.type}:${f.size}`));
 
-      const imageFiles = allFiles.filter(isImageFile);
-      if (!shouldIntercept(imageFiles)) return;
+    if (!shouldIntercept(imageFiles)) {
+      log('below minSize or no images', { minSizeKB: config.minSizeKB });
+      return false;
+    }
 
+    if (event) {
       event.stopImmediatePropagation();
       event.preventDefault();
+    }
 
-      activeSession = { kind: 'input', input: target };
-      showOptimizerUI(imageFiles, allFiles);
-    },
-    true
-  );
+    activeSession = { kind: 'input', input };
+    // 延后弹层，避免与站点同步 change 处理打架
+    const open = () => showOptimizerUI(imageFiles, allFiles);
+    if (!configReady) pendingJobs.push(open);
+    else queueMicrotask(open);
+    return true;
+  }
 
-  // ---------- drag & drop intercept ----------
+  function onChangeCapture(event) {
+    try {
+      const target = event.target;
+      // Shadow DOM 内控件：event.target 可能是 host，用 composedPath
+      let input = null;
+      if (target instanceof HTMLInputElement && target.type === 'file') {
+        input = target;
+      } else if (typeof event.composedPath === 'function') {
+        const path = event.composedPath();
+        for (let i = 0; i < path.length; i++) {
+          const n = path[i];
+          if (n instanceof HTMLInputElement && n.type === 'file') {
+            input = n;
+            break;
+          }
+        }
+      }
+      if (!input) return;
+      handleFileInput(input, event);
+    } catch (err) {
+      console.error('[TD-ImageCompress] change handler', err);
+    }
+  }
+
+  // document + window 双挂，提高捕获成功率
+  document.addEventListener('change', onChangeCapture, true);
+  window.addEventListener('change', onChangeCapture, true);
+
+  // 部分站点用 input 事件；少数只在冒泡阶段读 files —— 捕获阶段已拦 change 足够
+  // 额外：监听动态创建的 file input，打日志便于 debug
+  try {
+    const mo = new MutationObserver((mutations) => {
+      if (!config.debug) return;
+      for (const m of mutations) {
+        m.addedNodes &&
+          m.addedNodes.forEach((node) => {
+            if (!(node instanceof Element)) return;
+            if (node.matches && node.matches('input[type="file"]')) log('file input added', node);
+            const list = node.querySelectorAll && node.querySelectorAll('input[type="file"]');
+            if (list && list.length) log('file inputs in subtree', list.length);
+          });
+      }
+    });
+    const startMo = () => {
+      if (document.documentElement) {
+        mo.observe(document.documentElement, { childList: true, subtree: true });
+      }
+    };
+    if (document.documentElement) startMo();
+    else document.addEventListener('DOMContentLoaded', startMo, { once: true });
+  } catch (_) {
+    /* ignore */
+  }
+
+  // ---------- drag & drop ----------
 
   let dropOverlay = null;
 
   function ensureDropOverlay() {
-    if (dropOverlay) return dropOverlay;
+    if (dropOverlay && document.contains(dropOverlay)) return dropOverlay;
     const el = document.createElement('div');
     el.id = 'image-optimizer-drop-overlay';
     el.setAttribute('aria-hidden', 'true');
@@ -295,7 +433,7 @@
 
   document.addEventListener(
     'dragleave',
-    (e) => {
+    () => {
       if (!config.autoDetect) return;
       dropDepth = Math.max(0, dropDepth - 1);
       if (dropDepth === 0) hideDropOverlay();
@@ -307,7 +445,6 @@
     'dragover',
     (e) => {
       if (!config.autoDetect || !dataTransferHasFiles(e.dataTransfer)) return;
-      // 必须 preventDefault 才能成为合法 drop 目标，并抢在站点之前
       e.preventDefault();
       try {
         e.dataTransfer.dropEffect = 'copy';
@@ -329,18 +466,16 @@
       if (!allFiles.length) return;
 
       const imageFiles = allFiles.filter(isImageFile);
+      log('drop images', imageFiles.length);
       if (!shouldIntercept(imageFiles)) return;
 
-      // 拦截站点默认 drop 处理
       e.preventDefault();
       e.stopImmediatePropagation();
 
-      activeSession = {
-        kind: 'drop',
-        target: e.target,
-        originalEvent: e
-      };
-      showOptimizerUI(imageFiles, allFiles);
+      activeSession = { kind: 'drop', target: e.target, originalEvent: e };
+      const open = () => showOptimizerUI(imageFiles, allFiles);
+      if (!configReady) pendingJobs.push(open);
+      else queueMicrotask(open);
     },
     true
   );
@@ -354,7 +489,7 @@
     }
   });
 
-  // ---------- re-dispatch helpers ----------
+  // ---------- re-dispatch ----------
 
   function passThroughInput(input, files) {
     const dt = new DataTransfer();
@@ -363,16 +498,21 @@
     try {
       input.files = dt.files;
     } catch (err) {
-      console.error('[ImageCompress] assign files failed:', err);
+      console.error('[TD-ImageCompress] assign files failed:', err);
     }
     input.dispatchEvent(new Event('change', { bubbles: true }));
+    // 再补一次 input 事件，兼容只听 input 的站点
+    try {
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    } catch (_) {
+      /* ignore */
+    }
   }
 
   function passThroughDrop(session, files) {
     const target = session.target;
     if (!(target instanceof Element)) return;
 
-    // 找最近的可落点：优先 file input 所在表单/可拖放区
     const nearbyInput = findNearbyFileInput(target, files);
     if (nearbyInput) {
       passThroughInput(nearbyInput, files);
@@ -393,10 +533,8 @@
           clientY: session.originalEvent?.clientY || 0
         });
       } catch (_) {
-        // 部分环境 DataTransfer 只读，退回自定义事件携带 files
         ev = new CustomEvent(type, { bubbles: true, cancelable, detail: { files } });
       }
-      // 再挂一层，便于调试/站点自定义读取
       try {
         Object.defineProperty(ev, 'dataTransfer', { value: dt });
       } catch (_) {
@@ -411,17 +549,12 @@
   }
 
   function findNearbyFileInput(fromEl, files) {
-    const multi = files.length > 1;
     const acceptImages = (input) => {
       if (!(input instanceof HTMLInputElement) || input.type !== 'file') return false;
       if (input.disabled) return false;
-      if (multi && !input.multiple && files.filter(isImageFile).length > 1) {
-        // 仍可用，只是站点可能只取第一张
-      }
       return true;
     };
 
-    // 1) 目标自身或祖先内
     let el = fromEl;
     for (let i = 0; i < 8 && el; i++) {
       if (el instanceof HTMLInputElement && acceptImages(el)) return el;
@@ -430,7 +563,6 @@
       el = el.parentElement;
     }
 
-    // 2) 页面上唯一可见的 file input
     const inputs = Array.from(document.querySelectorAll('input[type="file"]')).filter(acceptImages);
     if (inputs.length === 1) return inputs[0];
     return null;
@@ -463,11 +595,12 @@
       afterUrl: null
     }));
 
-    const root = document.createElement('div');
-    root.id = 'image-optimizer-root';
-    root._items = items;
-    activeRoot = root;
-    const shadow = root.attachShadow({ mode: 'open' });
+    const host = mountHost();
+    host.style.pointerEvents = 'none';
+    activeRoot = host;
+    host._items = items;
+
+    const shadow = host.attachShadow({ mode: 'open' });
 
     const totalOriginalSize = imageFiles.reduce((acc, f) => acc + f.size, 0);
     const otherCount = allFiles.length - imageFiles.length;
@@ -475,18 +608,20 @@
 
     const style = document.createElement('style');
     style.textContent = `
+      :host { all: initial; }
       .optimizer-container {
         position: fixed;
         top: 20px;
         right: 20px;
         z-index: 2147483647;
-        background: rgba(255, 255, 255, 0.94);
+        pointer-events: auto;
+        background: rgba(255, 255, 255, 0.96);
         backdrop-filter: blur(20px) saturate(180%);
         -webkit-backdrop-filter: blur(20px) saturate(180%);
-        border: 1px solid rgba(0, 0, 0, 0.06);
+        border: 1px solid rgba(0, 0, 0, 0.08);
         border-radius: 16px;
         padding: 18px;
-        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.14);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
         font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
         width: 360px;
         max-width: calc(100vw - 24px);
@@ -535,19 +670,9 @@
         padding: 10px;
         background: rgba(0,0,0,0.02);
       }
-      .card.skipped {
-        opacity: 0.55;
-      }
-      .card-top {
-        display: flex;
-        gap: 8px;
-        align-items: center;
-      }
-      .thumbs {
-        display: flex;
-        gap: 6px;
-        flex-shrink: 0;
-      }
+      .card.skipped { opacity: 0.55; }
+      .card-top { display: flex; gap: 8px; align-items: center; }
+      .thumbs { display: flex; gap: 6px; flex-shrink: 0; }
       .thumb-wrap {
         width: 56px;
         height: 56px;
@@ -582,10 +707,7 @@
         color: #aeaeb2;
         font-size: 11px;
       }
-      .info {
-        flex: 1;
-        min-width: 0;
-      }
+      .info { flex: 1; min-width: 0; }
       .name {
         font-size: 12px;
         font-weight: 500;
@@ -602,13 +724,8 @@
       }
       .sizes .ok { color: #34c759; font-weight: 600; }
       .sizes .warn { color: #ff9f0a; font-weight: 600; }
-      .card-actions {
-        margin-top: 8px;
-        display: flex;
-        justify-content: flex-end;
-      }
+      .card-actions { margin-top: 8px; display: flex; justify-content: flex-end; }
       .btn-skip-one {
-        border: none;
         background: #fff;
         border: 1px solid rgba(0,0,0,0.08);
         color: #1d1d1f;
@@ -769,7 +886,8 @@
 
     shadow.appendChild(style);
     shadow.appendChild(container);
-    (document.documentElement || document.body).appendChild(root);
+
+    log('UI mounted');
 
     let busy = false;
     let compressedDone = false;
@@ -779,7 +897,8 @@
       shadow.querySelectorAll('button.main, .btn-skip-one').forEach((btn) => {
         btn.disabled = v;
       });
-      shadow.querySelector('.close').disabled = v;
+      const closeBtn = shadow.querySelector('.close');
+      if (closeBtn) closeBtn.disabled = v;
     };
 
     const updateSkipUI = (idx) => {
@@ -853,9 +972,7 @@
       const status = shadow.querySelector('#statusLabel');
       status.style.display = 'block';
 
-      const targets = items
-        .map((it, idx) => ({ it, idx }))
-        .filter(({ it }) => !it.skipped);
+      const targets = items.map((it, idx) => ({ it, idx })).filter(({ it }) => !it.skipped);
 
       try {
         let done = 0;
@@ -897,7 +1014,7 @@
         status.style.display = 'none';
         shadow.querySelector('#confirmBtn').style.display = 'block';
       } catch (err) {
-        console.error('[ImageCompress] failed:', err);
+        console.error('[TD-ImageCompress] failed:', err);
         status.textContent = '处理失败，请重试或原图上传';
         shadow.querySelector('#initialActions').style.display = 'flex';
       } finally {
@@ -934,4 +1051,7 @@
   function escapeAttr(str) {
     return escapeHtml(str).replace(/'/g, '&#39;');
   }
+
+  // 启动标记，便于控制台确认脚本已注入
+  console.info('[TD-ImageCompress] content script ready', location.href);
 })();

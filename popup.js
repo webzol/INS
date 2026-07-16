@@ -12,8 +12,9 @@ document.addEventListener('DOMContentLoaded', () => {
     autoDetect: true,
     quality: 80,
     maxEdge: 1920,
-    minSizeKB: 100,
-    format: 'auto'
+    minSizeKB: 0,
+    format: 'auto',
+    debug: false
   };
 
   function setFormatUI(format) {
@@ -31,15 +32,27 @@ document.addEventListener('DOMContentLoaded', () => {
     maxEdge.value = result.maxEdge ?? DEFAULTS.maxEdge;
     maxEdgeValue.textContent = `${maxEdge.value}px`;
 
+    // 若本地仍存着旧默认 100，且用户可能因此「选图无反应」，同步时仍尊重已存值；
+    // 首次安装用 0。用户可在 UI 拖到 0。
     minSizeKB.value = result.minSizeKB ?? DEFAULTS.minSizeKB;
     minSizeValue.textContent = `${minSizeKB.value}KB`;
 
     setFormatUI(result.format || DEFAULTS.format);
+
+    const debugEl = document.getElementById('debug');
+    if (debugEl) debugEl.checked = !!result.debug;
   });
 
   autoDetect.addEventListener('change', () => {
     chrome.storage.sync.set({ autoDetect: autoDetect.checked });
   });
+
+  const debugEl = document.getElementById('debug');
+  if (debugEl) {
+    debugEl.addEventListener('change', () => {
+      chrome.storage.sync.set({ debug: debugEl.checked });
+    });
+  }
 
   quality.addEventListener('input', () => {
     qualityValue.textContent = `${quality.value}%`;

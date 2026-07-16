@@ -7,6 +7,22 @@
 
 ---
 
+## [1.2.1] - 2026-07-16
+
+### 修复
+- **选图不弹层**：默认「最小触发」改为 **0KB**（全部拦截）；此前默认 100KB 会导致小图完全无反应
+- 图片 MIME 为空时按**扩展名**识别（jpg/png/webp 等）
+- `change` 监听同时挂在 `document` + `window`，并用 `composedPath` 兼容 Shadow DOM 内 file input
+- content script 改为 `document_start` 注入，减少被站点抢先绑定导致拦不到的情况
+- 浮层挂到 `documentElement` 固定层，降低被页面 CSS/`transform` 吃掉的概率
+- 确认上传时额外派发 `input` 事件，兼容只监听 `input` 的站点
+
+### 新增
+- 设置项「调试日志」：控制台输出 `[TD-ImageCompress]` 便于排查
+- 注入成功时打印 `content script ready`
+
+---
+
 ## [1.2.0] - 2026-07-16
 
 ### 新增
@@ -65,10 +81,12 @@
 
 | 版本 | 日期 | 摘要 |
 |------|------|------|
+| 1.2.1 | 2026-07-16 | 修复选图不拦截、注入时机与识别兜底 |
 | 1.2.0 | 2026-07-16 | 拖拽、缩略图、单张跳过、图标 |
 | 1.1.0 | 2026-07-16 | 智能格式、阈值/边长、多文件安全 |
 | 1.0.0 | 2026-05-14 | 初版拦截 + JPEG 压缩 |
 
+[1.2.1]: https://github.com/webzol/INS/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/webzol/INS/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/webzol/INS/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/webzol/INS/releases/tag/v1.0.0

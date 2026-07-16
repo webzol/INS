@@ -174,7 +174,7 @@
     </div>
     <div>
       <div class="title">TD-东哥 Image Compress</div>
-      <div class="version">v1.2.0 · 拖拽 / 缩略图 / 单张跳过</div>
+      <div class="version">v1.2.1 · 修复识别拦截</div>
     </div>
   </div>
 
@@ -210,10 +210,10 @@
   <div class="setting-item" style="flex-direction: column; align-items: stretch;">
     <div style="display: flex; justify-content: space-between; width: 100%;">
       <div class="setting-label">最小触发大小</div>
-      <div class="row-value" id="minSizeValue">100KB</div>
+      <div class="row-value" id="minSizeValue">0KB</div>
     </div>
-    <input type="range" id="minSizeKB" class="range" min="0" max="1024" value="100" step="10">
-    <div class="setting-desc">小于该体积的图片不拦截（0 = 全部）</div>
+    <input type="range" id="minSizeKB" class="range" min="0" max="1024" value="0" step="10">
+    <div class="setting-desc">小于该体积不拦截（0=全部拦截，推荐先用 0 测试）</div>
   </div>
 
   <div class="setting-item" style="flex-direction: column; align-items: stretch; margin-bottom: 8px;">
@@ -226,8 +226,20 @@
     <div class="setting-desc">智能：WebP/JPEG（及透明 PNG）择优，且不大于原图才替换</div>
   </div>
 
+  <div class="setting-item" style="margin-top: 4px;">
+    <div>
+      <div class="setting-label">调试日志</div>
+      <div class="setting-desc">控制台输出 [TD-ImageCompress] 日志</div>
+    </div>
+    <label class="switch">
+      <input type="checkbox" id="debug">
+      <span class="slider"></span>
+    </label>
+  </div>
+
   <div class="footer">
-    本地处理 · 不上传服务器 · Esc 关闭浮层
+    本地处理 · 不上传服务器 · Esc 关闭浮层<br>
+    改完设置后请刷新网页再试上传
   </div>
 
   <script src="popup.js"></script>

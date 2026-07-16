@@ -14,6 +14,20 @@
 
 无 background service worker；设置实时通过 `storage.onChanged` 同步到 content script。
 
+## 关键决策（1.2.1）
+
+1. **默认 minSizeKB=0**  
+   1.1/1.2 默认 100KB 会导致大量「能选图但扩展完全没反应」，最常见误判。改为 0，小图也拦截。
+
+2. **document_start + window/document 双监听 + composedPath**  
+   部分站点在 document_idle 前就绑死 change；Shadow 内 input 的 event.target 不是 input。
+
+3. **MIME 空扩展名兜底**  
+   Windows 部分路径/相册选图 `file.type === ''`，仅靠 mime 会漏检。
+
+4. **排查**  
+   控制台应出现 `[TD-ImageCompress] content script ready`；开调试后有 input/drop 日志。
+
 ## 关键决策（1.2.0）
 
 1. **拖拽拦截**  
