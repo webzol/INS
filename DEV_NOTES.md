@@ -14,6 +14,11 @@
 
 无 background service worker；设置实时通过 `storage.onChanged` 同步到 content script。
 
+## 关键决策（1.2.2）
+
+1. **弹层定位**  
+   host 不可用 `0×0`：Shadow 内 fixed 可能相对 host。改为全屏 fixed host（`pointer-events: none`）+ 面板 `position:absolute; top/right`（`pointer-events:auto`）。
+
 ## 关键决策（1.2.1）
 
 1. **默认 minSizeKB=0**  

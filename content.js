@@ -145,20 +145,32 @@
   }
 
   function mountHost() {
-    // 宿主本身 fixed，避免部分站点 body transform 导致 position:fixed 失效
+    // 全屏 fixed 宿主：Shadow 内 position:fixed 在部分站点会相对 host 计算；
+    // 若 host 是 0×0 左上角，面板会「跑到左边」。全屏 host + 面板 top/right 才稳。
     const host = document.createElement('div');
     host.id = 'image-optimizer-root';
     host.setAttribute('data-td-image-compress', '1');
     Object.assign(host.style, {
-      all: 'initial',
       position: 'fixed',
       top: '0',
       left: '0',
-      width: '0',
-      height: '0',
+      right: '0',
+      bottom: '0',
+      width: '100vw',
+      height: '100vh',
+      margin: '0',
+      padding: '0',
+      border: 'none',
       zIndex: '2147483647',
-      pointerEvents: 'none'
+      pointerEvents: 'none',
+      overflow: 'visible',
+      background: 'transparent',
+      transform: 'none',
+      filter: 'none',
+      perspective: 'none',
+      contain: 'none'
     });
+    // 尽量挂到 html，避开 body 上的 transform/filter 影响 fixed
     const parent = document.documentElement || document.body;
     parent.appendChild(host);
     return host;
@@ -608,11 +620,21 @@
 
     const style = document.createElement('style');
     style.textContent = `
-      :host { all: initial; }
+      :host {
+        all: initial;
+        position: fixed !important;
+        inset: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        z-index: 2147483647 !important;
+        pointer-events: none !important;
+        display: block !important;
+      }
       .optimizer-container {
-        position: fixed;
+        position: absolute;
         top: 20px;
         right: 20px;
+        left: auto;
         z-index: 2147483647;
         pointer-events: auto;
         background: rgba(255, 255, 255, 0.96);
@@ -624,15 +646,24 @@
         box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
         font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
         width: 360px;
-        max-width: calc(100vw - 24px);
+        max-width: min(360px, calc(100vw - 24px));
         max-height: calc(100vh - 40px);
         overflow: auto;
         animation: slideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
         color: #1d1d1f;
         box-sizing: border-box;
       }
+      @media (max-width: 420px) {
+        .optimizer-container {
+          top: 12px;
+          right: 12px;
+          left: 12px;
+          width: auto;
+          max-width: none;
+        }
+      }
       @keyframes slideIn {
-        from { transform: translateX(120%); opacity: 0; }
+        from { transform: translateX(40px); opacity: 0; }
         to { transform: translateX(0); opacity: 1; }
       }
       .title {
