@@ -1,24 +1,21 @@
 {
   "manifest_version": 3,
   "name": "TD-东哥 Image Compress Ultra",
-  "version": "1.0",
-  "description": "TD-东哥出品：简约高效的图片上传自动压缩工具",
+  "version": "1.1.0",
+  "description": "上传前自动拦截并智能压缩图片：WebP/JPEG 择优、保留透明、过大缩放、可跳过小图",
   "permissions": [
     "storage"
   ],
   "action": {
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_title": "TD-东哥 Image Compress"
   },
-  "web_accessible_resources": [
-    {
-      "resources": ["ui.html"],
-      "matches": ["<all_urls>"]
-    }
-  ],
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content.js"]
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": true
     }
   ]
 }
