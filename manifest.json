@@ -1,14 +1,26 @@
 {
   "manifest_version": 3,
   "name": "TD-东哥 Image Compress Ultra",
-  "version": "1.1.0",
-  "description": "上传前自动拦截并智能压缩图片：WebP/JPEG 择优、保留透明、过大缩放、可跳过小图",
+  "version": "1.2.0",
+  "description": "上传前自动拦截并智能压缩图片：支持拖拽、缩略图对比、单张跳过、WebP/JPEG 择优",
   "permissions": [
     "storage"
   ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "TD-东哥 Image Compress"
+    "default_title": "TD-东哥 Image Compress",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
   "content_scripts": [
     {
