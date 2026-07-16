@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TD-东哥 Image Compress Ultra</title>
+  <style>
+    :root {
+      --primary-color: #007AFF;
+      --bg-color: #ffffff;
+      --text-color: #1a1a1a;
+      --secondary-text: #666;
+      --border-color: #f0f0f0;
+    }
+    body {
+      width: 300px;
+      margin: 0;
+      padding: 20px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg-color);
+      color: var(--text-color);
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 24px;
+    }
+    .logo {
+      width: 32px;
+      height: 32px;
+      background: var(--primary-color);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+    }
+    .title {
+      font-size: 16px;
+      font-weight: 600;
+    }
+    .setting-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+    .setting-label {
+      font-size: 14px;
+    }
+    .setting-desc {
+      font-size: 12px;
+      color: var(--secondary-text);
+      margin-top: 4px;
+    }
+    /* Simple Switch */
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 44px;
+      height: 24px;
+    }
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #eee;
+      transition: .4s;
+      border-radius: 24px;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 18px;
+      width: 18px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: .4s;
+      border-radius: 50%;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    input:checked + .slider {
+      background-color: var(--primary-color);
+    }
+    input:checked + .slider:before {
+      transform: translateX(20px);
+    }
+    .quality-range {
+      width: 100%;
+      margin-top: 10px;
+      -webkit-appearance: none;
+      height: 4px;
+      background: #eee;
+      border-radius: 2px;
+      outline: none;
+    }
+    .quality-range::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px;
+      height: 16px;
+      background: var(--primary-color);
+      border-radius: 50%;
+      cursor: pointer;
+      border: 2px solid white;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+    }
+    .footer {
+      margin-top: 24px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border-color);
+      font-size: 11px;
+      color: var(--secondary-text);
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+      </svg>
+    </div>
+    <div class="title">TD-东哥 Image Compress</div>
+  </div>
+
+  <div class="setting-item">
+    <div>
+      <div class="setting-label">自动检测</div>
+      <div class="setting-desc">上传图片时自动询问是否压缩</div>
+    </div>
+    <label class="switch">
+      <input type="checkbox" id="autoDetect" checked>
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <div class="setting-item" style="flex-direction: column; align-items: flex-start;">
+    <div style="width: 100%; display: flex; justify-content: space-between;">
+      <div class="setting-label">压缩质量</div>
+      <div id="qualityValue" style="font-size: 12px; color: var(--primary-color); font-weight: 600;">80%</div>
+    </div>
+    <input type="range" id="quality" class="quality-range" min="10" max="100" value="80">
+    <div class="setting-desc">质量越低，文件体积越小</div>
+  </div>
+
+  <div class="footer">
+    简约设计 · 高效压缩 · 隐私安全
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
