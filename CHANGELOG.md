@@ -7,6 +7,15 @@
 
 ---
 
+## [1.2.3] - 2026-07-16
+
+### 修复
+- **确认上传死循环**：`document` + `window` 双监听下，旧的 `dataset.optimizerProcessed` 会在第一个 listener 被删掉，第二个 listener 再次拦截压缩结果，导致弹层反复出现、站点收不到文件
+- 放行策略改为：`event.isTrusted === false` 直接放行 + 时间窗 suppress + `WeakSet` 标记 input + 同一事件只处理一次
+- 写回 `FileList` 前先 suppress，再在 `requestAnimationFrame` 后派发 `change`/`input`
+
+---
+
 ## [1.2.2] - 2026-07-16
 
 ### 修复
@@ -88,12 +97,14 @@
 
 | 版本 | 日期 | 摘要 |
 |------|------|------|
+| 1.2.3 | 2026-07-16 | 修复确认上传后压缩死循环 |
 | 1.2.2 | 2026-07-16 | 修复弹层错位到左上角 |
 | 1.2.1 | 2026-07-16 | 修复选图不拦截、注入时机与识别兜底 |
 | 1.2.0 | 2026-07-16 | 拖拽、缩略图、单张跳过、图标 |
 | 1.1.0 | 2026-07-16 | 智能格式、阈值/边长、多文件安全 |
 | 1.0.0 | 2026-05-14 | 初版拦截 + JPEG 压缩 |
 
+[1.2.3]: https://github.com/webzol/INS/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/webzol/INS/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/webzol/INS/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/webzol/INS/compare/v1.1.0...v1.2.0

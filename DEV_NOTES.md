@@ -14,6 +14,18 @@
 
 无 background service worker；设置实时通过 `storage.onChanged` 同步到 content script。
 
+## 关键决策（1.2.3）
+
+1. **确认上传死循环根因**  
+   `window` + `document` 都在捕获阶段听 `change`。旧逻辑用 `dataset.optimizerProcessed`，第一个 listener 读到后**立刻 delete**，第二个 listener 看不到标记 → 把压缩后的文件当成新上传再次拦截 → 弹层循环。
+
+2. **放行策略（多层）**  
+   - `event.isTrusted === false`：扩展 `dispatchEvent` 的事件一律不拦截  
+   - `suppressInterceptUntil` 时间窗（约 3s）  
+   - `WeakSet(passThroughInputs)` 标记正在写回的 input  
+   - `WeakSet(seenEvents)` 同一事件只处理一次  
+   - 写回前 `beginSuppress`，UI 关闭后 `rAF` 再赋 files / 派发 change
+
 ## 关键决策（1.2.2）
 
 1. **弹层定位**  

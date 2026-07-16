@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TD-东哥 Image Compress Ultra",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "上传前自动拦截并智能压缩图片：支持拖拽、缩略图对比、单张跳过、WebP/JPEG 择优",
   "permissions": [
     "storage"

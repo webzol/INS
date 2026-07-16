@@ -23,6 +23,23 @@
   let configReady = false;
   const pendingJobs = [];
 
+  // 确认上传后的放行窗口：避免「写回 files + 派发 change」被自己再次拦截形成死循环
+  // 注意：document + window 双监听时，dataset 标记会在第一个 listener 里被删掉，第二个又重新拦截
+  let suppressInterceptUntil = 0;
+  /** @type {WeakSet<Event>} */
+  const seenEvents = new WeakSet();
+  /** @type {WeakSet<HTMLInputElement>} */
+  const passThroughInputs = new WeakSet();
+
+  function beginSuppress(ms) {
+    const until = Date.now() + (ms || 2500);
+    if (until > suppressInterceptUntil) suppressInterceptUntil = until;
+  }
+
+  function isSuppressed() {
+    return Date.now() < suppressInterceptUntil;
+  }
+
   function log(...args) {
     if (config.debug) console.log('[TD-ImageCompress]', ...args);
   }
@@ -303,9 +320,19 @@
       return false;
     }
     if (!(input instanceof HTMLInputElement) || input.type !== 'file') return false;
+
+    // 我们自己派发的 change/input 一律放行（避免确认上传死循环）
+    if (event && event.isTrusted === false) {
+      log('ignore untrusted change (pass-through)');
+      return false;
+    }
+    if (isSuppressed() || passThroughInputs.has(input)) {
+      log('suppress / passThrough active, allow site handler');
+      return false;
+    }
     if (input.dataset.optimizerProcessed === 'true') {
-      delete input.dataset.optimizerProcessed;
-      log('pass-through processed input');
+      // 兼容旧逻辑；不再在此删除，交由 suppress 窗口统一管理
+      log('optimizerProcessed flag, allow pass-through');
       return false;
     }
 
@@ -324,8 +351,15 @@
     }
 
     if (event) {
-      event.stopImmediatePropagation();
+      // 只 stopPropagation，避免 stopImmediatePropagation 在部分站点误伤；
+      // 捕获阶段拦截后站点冒泡监听拿不到原图 change 即可
+      event.stopPropagation();
       event.preventDefault();
+      try {
+        event.stopImmediatePropagation();
+      } catch (_) {
+        /* ignore */
+      }
     }
 
     activeSession = { kind: 'input', input };
@@ -338,6 +372,15 @@
 
   function onChangeCapture(event) {
     try {
+      // 同一事件可能同时打到 window + document 捕获，只处理一次
+      if (seenEvents.has(event)) return;
+      seenEvents.add(event);
+
+      if (!config.autoDetect) return;
+      if (isSuppressed()) return;
+      // 扩展自己 dispatch 的事件 isTrusted=false，必须放行给站点上传逻辑
+      if (event.isTrusted === false) return;
+
       const target = event.target;
       // Shadow DOM 内控件：event.target 可能是 host，用 composedPath
       let input = null;
@@ -360,7 +403,7 @@
     }
   }
 
-  // document + window 双挂，提高捕获成功率
+  // 只挂 document 捕获即可；window 再挂容易重复处理（seenEvents 已兜底，仍保留一份兼容）
   document.addEventListener('change', onChangeCapture, true);
   window.addEventListener('change', onChangeCapture, true);
 
@@ -473,6 +516,11 @@
     (e) => {
       hideDropOverlay();
       if (!config.autoDetect) return;
+      if (isSuppressed()) return;
+      // 我们重派发的 drop 不是用户手势，直接放行
+      if (e.isTrusted === false) return;
+      if (seenEvents.has(e)) return;
+      seenEvents.add(e);
 
       const allFiles = filesFromDataTransfer(e.dataTransfer);
       if (!allFiles.length) return;
@@ -482,7 +530,11 @@
       if (!shouldIntercept(imageFiles)) return;
 
       e.preventDefault();
-      e.stopImmediatePropagation();
+      try {
+        e.stopImmediatePropagation();
+      } catch (_) {
+        e.stopPropagation();
+      }
 
       activeSession = { kind: 'drop', target: e.target, originalEvent: e };
       const open = () => showOptimizerUI(imageFiles, allFiles);
@@ -504,26 +556,62 @@
   // ---------- re-dispatch ----------
 
   function passThroughInput(input, files) {
+    if (!input) return;
+
+    // 先开启放行，再改 files / 派发事件，防止重入
+    beginSuppress(3000);
+    passThroughInputs.add(input);
+    input.dataset.optimizerProcessed = 'true';
+
     const dt = new DataTransfer();
     files.forEach((f) => dt.items.add(f));
-    input.dataset.optimizerProcessed = 'true';
+
     try {
       input.files = dt.files;
     } catch (err) {
       console.error('[TD-ImageCompress] assign files failed:', err);
     }
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-    // 再补一次 input 事件，兼容只听 input 的站点
+
+    // 微任务 + 宏任务各清一次标记；suppress 时间窗兜底
+    const clearFlag = () => {
+      try {
+        delete input.dataset.optimizerProcessed;
+      } catch (_) {
+        /* ignore */
+      }
+      // WeakSet 无法 delete 特定语义上的「过期」，保留即可（配合 suppress 时间窗）
+    };
+
+    try {
+      // 冒泡 change，让站点业务逻辑收到压缩后的 FileList
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    } catch (err) {
+      console.error('[TD-ImageCompress] dispatch change failed:', err);
+    }
     try {
       input.dispatchEvent(new Event('input', { bubbles: true }));
     } catch (_) {
       /* ignore */
     }
+
+    queueMicrotask(clearFlag);
+    setTimeout(clearFlag, 0);
+    setTimeout(() => {
+      try {
+        passThroughInputs.delete(input);
+      } catch (_) {
+        /* ignore */
+      }
+    }, 3000);
+
+    log('passThroughInput done', files.map((f) => `${f.name}:${f.size}`));
   }
 
   function passThroughDrop(session, files) {
     const target = session.target;
     if (!(target instanceof Element)) return;
+
+    beginSuppress(3000);
 
     const nearbyInput = findNearbyFileInput(target, files);
     if (nearbyInput) {
@@ -558,6 +646,7 @@
     fire('dragenter', true);
     fire('dragover', true);
     fire('drop', true);
+    log('passThroughDrop done', files.map((f) => `${f.name}:${f.size}`));
   }
 
   function findNearbyFileInput(fromEl, files) {
@@ -582,15 +671,24 @@
 
   function commitFiles(files) {
     const session = activeSession;
+    // 先抑制拦截，再关 UI、再写回，顺序很重要
+    beginSuppress(3000);
     dismissUI();
     activeSession = null;
     if (!session) return;
 
-    if (session.kind === 'input') {
-      passThroughInput(session.input, files);
-    } else if (session.kind === 'drop') {
-      passThroughDrop(session, files);
-    }
+    // 下一帧再写回，确保弹层已卸掉、suppress 已生效
+    requestAnimationFrame(() => {
+      try {
+        if (session.kind === 'input') {
+          passThroughInput(session.input, files);
+        } else if (session.kind === 'drop') {
+          passThroughDrop(session, files);
+        }
+      } catch (err) {
+        console.error('[TD-ImageCompress] commitFiles failed:', err);
+      }
+    });
   }
 
   // ---------- UI ----------
